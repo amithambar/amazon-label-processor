@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Amazon Labels Processor by Amit Hambar</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- pdf-lib -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+    
+    <!-- PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    
+    <!-- SortableJS -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+
+    <style>
+        .page-card { transition: all 0.2s ease; }
+        .page-card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+        .page-deleted { border-color: #ef4444 !important; background-color: #fef2f2 !important; }
+        .page-deleted .page-overlay { opacity: 1 !important; }
+        .page-deleted canvas { filter: grayscale(100%) blur(1px); opacity: 0.5; }
+        
+        .wizard-step { display: none; }
+        .wizard-step.active { display: flex; animation: fadeIn 0.3s ease-out forwards; }
+        
+        .sortable-ghost { opacity: 0.4; background-color: #f8fafc; border: 2px dashed #cbd5e1; }
+        .sortable-drag { cursor: grabbing !important; }
+        .cursor-grab { cursor: grab; }
+        
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans text-slate-800 flex flex-col items-center">
+
+    <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <div id="loading-overlay" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex-col items-center justify-center">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl flex flex-col items-center max-w-sm w-full mx-4">
+            <svg class="animate-spin h-12 w-12 text-blue-600 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <h3 id="loading-title" class="text-xl font-bold text-slate-800">Processing...</h3>
+            <p id="loading-desc" class="text-sm text-slate-500 mt-2 text-center">Please wait</p>
+        </div>
+    </div>
+
+    <div class="max-w-5xl w-full bg-white rounded-2xl shadow-lg border border-slate-200 mt-6 md:mt-10 mb-10 overflow-hidden flex flex-col min-h-[75vh]">
+        
+        <div class="bg-slate-800 text-white p-5 text-center flex-shrink-0">
+            <h1 class="text-2xl font-bold">Amazon Labels Processor by Amit Hambar</h1>
+            <div class="flex justify-center mt-4 space-x-2 md:space-x-8 text-sm font-medium text-slate-400" id="stepper">
+                <span class="step-indicator text-white" id="ind-1">1. Upload</span>
+                <span class="step-indicator" id="ind-2">2. Cleanup Pages</span>
+                <span class="step-indicator" id="ind-3">3. Sort Groups</span>
+                <span class="step-indicator" id="ind-4">4. Export</span>
+            </div>
+        </div>
+
+        <div class="p-6 md:p-8 flex-1 flex flex-col">
+            
+            <!-- STEP 1: Upload -->
+            <div id="step-1" class="wizard-step active flex-col items-center justify-center flex-1">
+                <div id="dropzone" class="w-full max-w-xl border-2 border-dashed border-slate-300 rounded-xl p-16 text-center cursor-pointer hover:bg-blue-50 hover:border-blue-500 transition-all group">
+                    <input type="file" id="fileInput" accept="application/pdf" class="hidden">
+                    <svg class="mx-auto h-16 w-16 text-slate-400 group-hover:text-blue-500 transition-colors mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <h3 class="text-xl font-bold text-slate-700">Drop PDF here to begin</h3>
+                    <p class="text-slate-500 text-sm mt-2">or click to browse your files</p>
+                </div>
+            </div>
+
+            <!-- STEP 2: Cleanup Pages -->
+            <div id="step-2" class="wizard-step flex-col h-full flex-1">
+                <div class="flex justify-between items-center mb-4 flex-shrink-0">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-800">Cleanup & Delete Unwanted Pages</h2>
+                        <p class="text-sm text-slate-500">Click a thumbnail to delete. Remaining pages MUST be in pairs (Label, Invoice, Label, Invoice...).</p>
+                    </div>
+                    <button id="btnConfirmPages" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-5 rounded-lg shadow transition">
+                        Confirm Pages &rarr;
+                    </button>
+                </div>
+                
+                <div class="bg-slate-50 rounded-xl p-4 border border-slate-200 flex-1 overflow-y-auto max-h-[60vh]">
+                    <div id="pages-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                        <!-- Thumbnails injected here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- STEP 3: Sort by SKU Groups -->
+            <div id="step-3" class="wizard-step flex-col h-full flex-1">
+                <div class="flex justify-between items-center mb-4 flex-shrink-0">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-800">Sort SKU Groups</h2>
+                        <p class="text-sm text-slate-500">Orders have been grouped by their extracted SKU. Drag the groups to rearrange your final print sequence.</p>
+                    </div>
+                    <button id="btnFinalizeSequence" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-5 rounded-lg shadow transition">
+                        Finalize Sequence &rarr;
+                    </button>
+                </div>
+
+                <div class="bg-slate-50 rounded-xl border border-slate-200 flex-1 overflow-y-auto max-h-[60vh]">
+                    <div class="bg-slate-100 text-slate-500 text-xs font-bold uppercase flex px-4 py-3 border-b border-slate-200 sticky top-0 z-10">
+                        <div class="w-16 text-center">Drag</div>
+                        <div class="flex-1">Extracted SKU Group</div>
+                        <div class="w-24 text-center">Orders</div>
+                    </div>
+                    <ul id="sortable-list" class="flex flex-col divide-y divide-slate-200">
+                        <!-- Group items injected here -->
+                    </ul>
+                </div>
+            </div>
+
+            <!-- STEP 4: Export Options -->
+            <div id="step-4" class="wizard-step flex-col items-center justify-center flex-1 text-center">
+                <div class="mb-8">
+                    <div class="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
+                    </div>
+                    <h2 class="text-3xl font-bold text-slate-800">Ready to Export!</h2>
+                    <p class="text-slate-500 mt-2">Your document is grouped, sorted, and ready to print.</p>
+                </div>
+                
+                <div class="flex flex-col sm:flex-row gap-4 w-full max-w-xl justify-center">
+                    <button id="btnDownloadLabels" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-4 px-6 rounded-xl shadow-md transition flex flex-col items-center space-y-1">
+                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+                        <span>Download Thermal Labels</span>
+                        <span class="text-xs font-normal text-emerald-100">(1 per page, original size)</span>
+                    </button>
+                    
+                    <button id="btnDownloadInvoices" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-xl shadow-md transition flex flex-col items-center space-y-1">
+                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                        <span>Download 2x2 Invoices</span>
+                        <span class="text-xs font-normal text-blue-100">(Cut & Stack format)</span>
+                    </button>
+                </div>
+                
+                <button onclick="window.location.reload()" class="mt-8 text-slate-400 hover:text-slate-600 font-medium text-sm underline transition">
+                    Start Over with a New File
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            
+            const state = {
+                file: null, 
+                fileName: "",
+                totalPages: 0,
+                deletedPages: new Set(),
+                skuGroups: [], // Array of objects: { id, skuName, pairs: [{labelIdx, invIdx}] }
+                sortedGroups: []
+            };
+
+            const fileInput = document.getElementById('fileInput');
+            const dropzone = document.getElementById('dropzone');
+            const pagesGrid = document.getElementById('pages-grid');
+            const sortableList = document.getElementById('sortable-list');
+            const toastContainer = document.getElementById('toast-container');
+            const loadingOverlay = document.getElementById('loading-overlay');
+            const loadingTitle = document.getElementById('loading-title');
+            const loadingDesc = document.getElementById('loading-desc');
+
+            // Navigation & Utilities
+            function goToStep(stepNumber) {
+                document.querySelectorAll('.wizard-step').forEach(el => el.classList.remove('active'));
+                document.getElementById(`step-${stepNumber}`).classList.add('active');
+                
+                document.querySelectorAll('.step-indicator').forEach((el, index) => {
+                    if (index + 1 === stepNumber) {
+                        el.classList.add('text-white');
+                        el.classList.remove('text-slate-400');
+                    } else if (index + 1 < stepNumber) {
+                        el.classList.add('text-white');
+                    }
+                });
+            }
+
+            function showToast(message, type = "info") {
+                const toast = document.createElement('div');
+                const colors = type === "error" ? "bg-red-600" : (type === "success" ? "bg-emerald-600" : "bg-slate-800");
+                toast.className = `transform transition-all duration-300 translate-x-full opacity-0 ${colors} text-white px-5 py-3 rounded-lg shadow-lg font-medium text-sm flex items-center space-x-3`;
+                toast.innerHTML = `<span>${message}</span>`;
+                toastContainer.appendChild(toast);
+
+                requestAnimationFrame(() => toast.classList.remove('translate-x-full', 'opacity-0'));
+                setTimeout(() => {
+                    toast.classList.add('translate-x-full', 'opacity-0');
+                    setTimeout(() => toast.remove(), 300);
+                }, 4000);
+            }
+
+            function showLoading(title, desc) {
+                loadingTitle.textContent = title;
+                loadingDesc.textContent = desc;
+                loadingOverlay.classList.remove('hidden');
+                loadingOverlay.classList.add('flex');
+            }
+
+            function hideLoading() {
+                loadingOverlay.classList.add('hidden');
+                loadingOverlay.classList.remove('flex');
+            }
+
+            // --- STEP 1: Upload Logic ---
+            dropzone.addEventListener('click', () => fileInput.click());
+            dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('border-blue-500', 'bg-blue-50'); });
+            dropzone.addEventListener('dragleave', (e) => { e.preventDefault(); dropzone.classList.remove('border-blue-500', 'bg-blue-50'); });
+            dropzone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropzone.classList.remove('border-blue-500', 'bg-blue-50');
+                if (e.dataTransfer.files.length && e.dataTransfer.files[0].type === "application/pdf") {
+                    handleFile(e.dataTransfer.files[0]);
+                } else {
+                    showToast("Please drop a valid PDF file.", "error");
+                }
+            });
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files.length) handleFile(fileInput.files[0]);
+            });
+
+            async function handleFile(file) {
+                state.file = file; 
+                state.fileName = file.name;
+                showLoading("Reading Document", "Rendering pages for cleanup...");
+                try {
+                    await renderStep2Thumbnails();
+                    goToStep(2);
+                } catch (err) {
+                    showToast("Error reading PDF: " + err.message, "error");
+                    console.error(err);
+                } finally {
+                    hideLoading();
+                }
+            }
+
+            // --- STEP 2: Cleanup Pages ---
+            async function renderStep2Thumbnails() {
+                pagesGrid.innerHTML = '';
+                state.deletedPages.clear();
+                
+                const buffer = await state.file.arrayBuffer();
+                const pdfDocJs = await pdfjsLib.getDocument({ data: buffer }).promise;
+                state.totalPages = pdfDocJs.numPages;
+
+                for (let i = 1; i <= state.totalPages; i++) {
+                    const pageIndex = i - 1; 
+                    const page = await pdfDocJs.getPage(i);
+                    const viewport = page.getViewport({ scale: 0.3 });
+                    
+                    const card = document.createElement('div');
+                    card.className = "page-card relative bg-white border-2 border-slate-200 rounded-lg p-2 cursor-pointer shadow-sm select-none flex flex-col items-center";
+                    
+                    const badge = document.createElement('div');
+                    badge.className = "text-xs font-bold px-2 py-1 rounded mb-2 w-full text-center bg-slate-200 text-slate-700";
+                    badge.textContent = `Page ${i}`;
+                    
+                    const canvasWrapper = document.createElement('div');
+                    canvasWrapper.className = "relative inline-block w-full";
+                    
+                    const canvas = document.createElement('canvas');
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    canvas.className = "w-full h-auto rounded border border-slate-200";
+                    
+                    const overlay = document.createElement('div');
+                    overlay.className = "page-overlay absolute inset-0 bg-red-500/10 flex flex-col items-center justify-center rounded opacity-0 transition-opacity";
+                    overlay.innerHTML = `<span class="text-xs font-bold text-red-600 bg-white px-2 py-0.5 rounded shadow border border-red-200">DELETED</span>`;
+
+                    canvasWrapper.appendChild(canvas);
+                    canvasWrapper.appendChild(overlay);
+                    card.appendChild(badge);
+                    card.appendChild(canvasWrapper);
+                    
+                    card.addEventListener('click', () => {
+                        if (state.deletedPages.has(pageIndex)) {
+                            state.deletedPages.delete(pageIndex);
+                            card.classList.remove('page-deleted', 'border-red-500');
+                        } else {
+                            state.deletedPages.add(pageIndex);
+                            card.classList.add('page-deleted', 'border-red-500');
+                        }
+                    });
+
+                    pagesGrid.appendChild(card);
+                    const ctx = canvas.getContext('2d');
+                    await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+                }
+            }
+
+            document.getElementById('btnConfirmPages').addEventListener('click', async () => {
+                const activeIndices = [];
+                for (let i = 0; i < state.totalPages; i++) {
+                    if (!state.deletedPages.has(i)) activeIndices.push(i);
+                }
+
+                if (activeIndices.length === 0) return showToast("You deleted all pages!", "error");
+                
+                if (activeIndices.length % 2 !== 0) {
+                    return showToast(`Validation Error: Remaining pages (${activeIndices.length}) is an ODD number. Orders must be in pairs (Label + Invoice).`, "error");
+                }
+
+                showLoading("Analyzing Orders", "Extracting SKUs and grouping pairs...");
+                try {
+                    await buildSkuGroups(activeIndices);
+                    renderSortableGroups();
+                    goToStep(3);
+                } catch (err) {
+                    showToast("Error processing text: " + err.message, "error");
+                    console.error(err);
+                } finally {
+                    hideLoading();
+                }
+            });
+
+            // --- STEP 3: Sort SKU Groups ---
+            async function buildSkuGroups(activeIndices) {
+                // Fetch fresh buffer for text extraction to avoid detached buffer errors
+                const buffer = await state.file.arrayBuffer();
+                const pdfDocJs = await pdfjsLib.getDocument({ data: buffer }).promise;
+                
+                const skuMap = new Map();
+
+                for (let i = 0; i < activeIndices.length; i += 2) {
+                    const labelIdx = activeIndices[i];
+                    const invIdx = activeIndices[i + 1];
+                    
+                    const page = await pdfDocJs.getPage(invIdx + 1); 
+                    const textContent = await page.getTextContent();
+                    const fullText = textContent.items.map(item => item.str).join(' ');
+                    
+                    // Regex logic: Matches content inside parentheses directly preceding "HSN"
+                    const matches = [...fullText.matchAll(/\(([^)]+)\)\s*HSN/gi)];
+                    const sku = matches.length > 0 ? matches[0][1].trim() : "Unknown SKU";
+
+                    if (!skuMap.has(sku)) {
+                        skuMap.set(sku, { id: 'group-' + Math.random().toString(36).substr(2, 9), skuName: sku, pairs: [] });
+                    }
+                    skuMap.get(sku).pairs.push({ labelIdx, invIdx });
+                }
+
+                state.skuGroups = Array.from(skuMap.values());
+            }
+
+            function renderSortableGroups() {
+                sortableList.innerHTML = '';
+                
+                state.skuGroups.forEach((group) => {
+                    const li = document.createElement('li');
+                    li.className = "group-item bg-white p-4 flex items-center hover:bg-slate-50 transition-colors pointer-events-auto border-l-4 border-transparent hover:border-blue-400";
+                    li.dataset.id = group.id;
+                    
+                    li.innerHTML = `
+                        <div class="w-16 flex justify-center items-center cursor-grab text-slate-400 hover:text-slate-600">
+                            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                        </div>
+                        <div class="flex-1 font-semibold text-slate-800 text-lg">
+                            ${group.skuName}
+                        </div>
+                        <div class="w-24 text-center">
+                            <span class="bg-blue-100 text-blue-800 text-xs font-bold px-2.5 py-1 rounded-full border border-blue-200">
+                                ${group.pairs.length} Order${group.pairs.length > 1 ? 's' : ''}
+                            </span>
+                        </div>
+                    `;
+                    sortableList.appendChild(li);
+                });
+
+                new Sortable(sortableList, {
+                    animation: 150,
+                    ghostClass: 'sortable-ghost',
+                    dragClass: 'sortable-drag',
+                    handle: '.cursor-grab',
+                });
+            }
+
+            document.getElementById('btnFinalizeSequence').addEventListener('click', () => {
+                const itemEls = Array.from(sortableList.querySelectorAll('.group-item'));
+                state.sortedGroups = [];
+                
+                itemEls.forEach(el => {
+                    const id = el.dataset.id;
+                    const group = state.skuGroups.find(g => g.id === id);
+                    if (group) state.sortedGroups.push(group);
+                });
+
+                showToast("Sequence Finalized!", "success");
+                goToStep(4);
+            });
+
+            // --- STEP 4: Export logic ---
+            document.getElementById('btnDownloadLabels').addEventListener('click', async () => {
+                showLoading("Generating PDF", "Extracting sorted labels...");
+                try { await processDownload('labels'); }
+                catch(e) { showToast("Error: " + e.message, "error"); console.error(e); }
+                finally { hideLoading(); }
+            });
+
+            document.getElementById('btnDownloadInvoices').addEventListener('click', async () => {
+                showLoading("Generating PDF", "Applying Cut & Stack logic to invoices...");
+                try { await processDownload('invoices'); }
+                catch(e) { showToast("Error: " + e.message, "error"); console.error(e); }
+                finally { hideLoading(); }
+            });
+
+            async function processDownload(type) {
+                const { PDFDocument } = PDFLib;
+                
+                // Fetch fresh array buffer immediately before passing to pdf-lib
+                const buffer = await state.file.arrayBuffer();
+                const srcDoc = await PDFDocument.load(buffer);
+                const outDoc = await PDFDocument.create();
+
+                // Flatten the groups into a single array of pairs based on the sorted group order
+                const flattenedPairs = [];
+                state.sortedGroups.forEach(group => {
+                    group.pairs.forEach(pair => flattenedPairs.push(pair));
+                });
+
+                if (type === 'labels') {
+                    const labelIndices = flattenedPairs.map(p => p.labelIdx);
+                    const copiedPages = await outDoc.copyPages(srcDoc, labelIndices);
+                    copiedPages.forEach(page => outDoc.addPage(page));
+                    triggerDownload(await outDoc.save(), 'Sorted_Labels');
+                } 
+                else if (type === 'invoices') {
+                    const invoiceIndices = flattenedPairs.map(p => p.invIdx);
+                    const targetPages = invoiceIndices.map(idx => srcDoc.getPage(idx));
+                    const embeddedPages = await outDoc.embedPages(targetPages);
+
+                    const outPageWidth = 595.28; 
+                    const outPageHeight = 841.89; 
+                    const cellWidth = outPageWidth / 2; 
+                    const cellHeight = outPageHeight / 2;
+
+                    const N = embeddedPages.length;
+                    const P = Math.ceil(N / 4);
+
+                    for (let p = 0; p < P; p++) {
+                        const outPage = outDoc.addPage([outPageWidth, outPageHeight]);
+                        
+                        for (let q = 0; q < 4; q++) {
+                            const itemIndex = q * P + p; // Cut and stack calculation
+                            
+                            if (itemIndex < N) {
+                                const embPage = embeddedPages[itemIndex];
+                                
+                                // Manual scaling instead of scaleToFit to prevent errors on EmbeddedPages
+                                const maxWidth = cellWidth - 30; 
+                                const maxHeight = cellHeight - 30;
+                                const scaleFactor = Math.min(maxWidth / embPage.width, maxHeight / embPage.height);
+                                const dims = embPage.scale(scaleFactor);
+                                
+                                // Quadrants: q=0 TopLeft, q=1 TopRight, q=2 BottomLeft, q=3 BottomRight
+                                let cellX = (q === 1 || q === 3) ? cellWidth : 0;
+                                let cellY = (q === 0 || q === 1) ? cellHeight : 0;
+                                
+                                const xPos = cellX + (cellWidth - dims.width) / 2;
+                                const yPos = cellY + (cellHeight - dims.height) / 2;
+                                
+                                outPage.drawPage(embPage, {
+                                    x: xPos, y: yPos, width: dims.width, height: dims.height,
+                                });
+                            }
+                        }
+                    }
+                    triggerDownload(await outDoc.save(), 'Sorted_Invoices_2x2');
+                }
+            }
+
+            function triggerDownload(pdfBytes, suffix) {
+                const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const baseName = state.fileName.replace(/\.[^/.]+$/, "");
+                a.download = `${baseName}_${suffix}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+            }
+        });
+    </script>
+</body>
+</html>
